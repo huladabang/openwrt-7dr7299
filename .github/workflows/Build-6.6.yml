@@ -1,188 +1,125 @@
-name: Build-6.6
+name: Build TL-7DR7299 closed-source Wi-Fi firmware
 
 on:
   workflow_dispatch:
     inputs:
-      clean_toolchain:
-        description: '是否清理已缓存的工具链（强制重新编译）'
+      clean_cache:
+        description: Clear compiler cache before building
         required: false
-        default: 'false'
-        type: choice
-        options:
-          - 'false'
-          - 'true'
-  schedule:
-    - cron: '0 18 */3 * *'
+        default: false
+        type: boolean
 
-permissions: write-all
+permissions:
+  contents: write
+
+concurrency:
+  group: tl-7dr7299-firmware
+  cancel-in-progress: false
 
 env:
   REPO_URL: https://github.com/padavanonly/immortalwrt-mt798x-6.6.git
   REPO_BRANCH: mt798x-mt799x-6.6-mtwifi
-  CONFIG_BASE: configs/6.6.txt
-  CONFIG_CUSTOM: configs/CUSTOMIZE.txt
-  DIY_SCRIPT: scripts/diy-script.sh
-  DIY_SCRIPT_2: scripts/diy-6.6.sh
-  CACHE_TOOLCHAIN: true
-  UPLOAD_BIN_DIR: false
-  FIRMWARE_RELEASE: true
-  FIRMWARE_TAG: TL-7DR7299-v1
   TZ: Asia/Shanghai
 
 jobs:
-  Build:
-    runs-on: ubuntu-latest
+  build:
+    runs-on: ubuntu-24.04
     steps:
-    - name: Free disk space
-      uses: jlumbroso/free-disk-space@main
-      with:
-        tool-cache: false
-        android: true
-        dotnet: true
-        haskell: true
-        large-packages: true
-        docker-images: true
-        swap-storage: false
+      - name: Checkout build configuration
+        uses: actions/checkout@v5
 
-    - name: Initialization Environment(初始化环境)
-      env:
-        DEBIAN_FRONTEND: noninteractive
-      run: |
-        sudo mkdir -p /etc/apt/preferences.d
-        sudo tee /etc/apt/preferences.d/nosnap.pref > /dev/null << 'EOF'
-        Package: snapd
-        Pin: release a=*
-        Pin-Priority: -10
-        EOF
-        sudo apt-get purge -y snapd
-        sudo bash -c 'bash <(curl -sL https://build-scripts.immortalwrt.org/init_build_environment.sh)'
-        sudo -E apt -yqq install dos2unix libfuse-dev
-        sudo -E apt -yqq autoremove --purge
-        sudo -E apt -yqq autoclean
-        sudo -E apt -yqq clean
-        sudo -E systemctl daemon-reload
-        sudo timedatectl set-timezone "$TZ"
+      - name: Free disk space
+        uses: jlumbroso/free-disk-space@main
+        with:
+          tool-cache: false
+          android: true
+          dotnet: true
+          haskell: true
+          large-packages: true
+          docker-images: true
+          swap-storage: false
 
-    - name: Checkout
-      uses: actions/checkout@v5
+      - name: Install build dependencies
+        env:
+          DEBIAN_FRONTEND: noninteractive
+        run: |
+          sudo bash -c 'bash <(curl -sL https://build-scripts.immortalwrt.org/init_build_environment.sh)'
+          sudo apt-get install -y dos2unix libfuse-dev
+          sudo timedatectl set-timezone "$TZ"
 
-    - name: Clone Source Code(克隆源代码)
-      run: |
-        df -hT $GITHUB_WORKSPACE
-        git clone "$REPO_URL" -b "$REPO_BRANCH" openwrt
-        cd openwrt
-        echo "OPENWRT_PATH=$PWD" >> $GITHUB_ENV
-        VERSION_INFO=$(git show -s --date=short --format="作者: %an<br/>时间: %cd<br/>内容: %s<br/>hash: %H")
-        echo "VERSION_INFO=$VERSION_INFO" >> $GITHUB_ENV
+      - name: Clone ImmortalWrt source
+        run: |
+          git clone --depth=1 --branch "$REPO_BRANCH" "$REPO_URL" openwrt
+          echo "OPENWRT_PATH=$GITHUB_WORKSPACE/openwrt" >> "$GITHUB_ENV"
 
-    - name: Update Feeds(更新feeds)
-      run: |
-        cd $OPENWRT_PATH
-        ./scripts/feeds update -a
-        ./scripts/feeds install -a
+      - name: Prepare feeds and packages
+        run: |
+          cd "$OPENWRT_PATH"
+          "$GITHUB_WORKSPACE/scripts/diy-script.sh"
+          ./scripts/feeds update -a
+          ./scripts/feeds install -a
+          "$GITHUB_WORKSPACE/scripts/diy-6.6.sh"
 
-    - name: Load Custom Configuration(加载自定义配置)
-      run: |
-        [ -e files ] && mv files $OPENWRT_PATH/files
-        [ -e $CONFIG_BASE ] && cat $CONFIG_BASE > $OPENWRT_PATH/.config
-        [ -e $CONFIG_CUSTOM ] && cat $CONFIG_CUSTOM >> $OPENWRT_PATH/.config
-        [ -e "$GITHUB_WORKSPACE/$DIY_SCRIPT" ] && chmod +x "$GITHUB_WORKSPACE/$DIY_SCRIPT" && cd "$OPENWRT_PATH" && "$GITHUB_WORKSPACE/$DIY_SCRIPT"
-        [ -e "$GITHUB_WORKSPACE/$DIY_SCRIPT_2" ] && chmod +x "$GITHUB_WORKSPACE/$DIY_SCRIPT_2" && cd "$OPENWRT_PATH" && "$GITHUB_WORKSPACE/$DIY_SCRIPT_2"
-        cd $OPENWRT_PATH
-        make defconfig
+      - name: Generate configuration
+        run: |
+          cd "$OPENWRT_PATH"
+          cp defconfig/mt7988_mt7992.config .config
+          cat "$GITHUB_WORKSPACE/configs/6.6.txt" >> .config
+          make defconfig
+          grep -E 'CONFIG_TARGET_.*7dr7299|CONFIG_PACKAGE_(luci-app-store|luci-app-openclash|luci-app-turboacc-mtk|luci-app-ttyd|luci-app-samba4|luci-app-nlbwmon|luci-app-upnp|luci-app-filemanager|kmod-tun|tailscale)=' .config
 
-    - name: Generate Variables(生成变量)
-      run: |
-        cd $OPENWRT_PATH
-        SOURCE_REPO="$(echo $REPO_URL | awk -F '/' '{print $(NF)}')"
-        SOURCE_REPO="${SOURCE_REPO%.git}"
-        echo "SOURCE_REPO=$SOURCE_REPO" >> $GITHUB_ENV
-        DEVICE_TARGET=$(grep CONFIG_TARGET_BOARD .config | awk -F '"' '{print $2}')
-        echo "DEVICE_TARGET=$DEVICE_TARGET" >> $GITHUB_ENV
-        DEVICE_SUBTARGET=$(grep CONFIG_TARGET_SUBTARGET .config | awk -F '"' '{print $2}')
-        echo "DEVICE_SUBTARGET=$DEVICE_SUBTARGET" >> $GITHUB_ENV
-        DEVICE_PROFILE=$(grep '^CONFIG_TARGET_.*DEVICE_.*=y$' .config | sed 's/^CONFIG_TARGET_//; s/=y$//' | tail -n 1)
-        echo "DEVICE_PROFILE=$DEVICE_PROFILE" >> $GITHUB_ENV
+      - name: Restore compiler cache
+        if: ${{ !inputs.clean_cache }}
+        uses: HiGarfield/cachewrtbuild@main
+        with:
+          ccache: true
+          toolchain: true
+          mixkey: tl-7dr7299-mtwifi-6.6
+          prefix: ${{ env.OPENWRT_PATH }}
 
-    - name: Cache Clean(清理缓存)
-      if: github.event.inputs.clean_toolchain == 'true'
-      env:
-        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      run: gh cache delete --all
+      - name: Download sources
+        run: |
+          cd "$OPENWRT_PATH"
+          make download -j8
+          find dl -size -1024c -print -delete
 
-    - name: Cache Toolchain(缓存工具链)
-      if: env.CACHE_TOOLCHAIN == 'true'
-      uses: HiGarfield/cachewrtbuild@main
-      with:
-        ccache: true
-        toolchain: true
-        mixkey: ${{ env.SOURCE_REPO }}-${{ env.REPO_BRANCH }}-${{ env.DEVICE_TARGET }}-${{ env.DEVICE_SUBTARGET }}
-        prefix: ${{ env.OPENWRT_PATH }}
+      - name: Compile firmware
+        run: |
+          cd "$OPENWRT_PATH"
+          make -j"$(nproc)" || make -j1 V=s
 
-    - name: Download DL Package(下载DL软件包)
-      run: |
-        cd $OPENWRT_PATH
-        make download -j8
-        find dl -size -1024c -exec ls -l {} \;
-        find dl -size -1024c -exec rm -f {} \;
+      - name: Verify and collect output
+        run: |
+          cd "$OPENWRT_PATH"
+          output_dir="$(find bin/targets -mindepth 2 -maxdepth 2 -type d | head -n1)"
+          test -n "$output_dir"
+          test -f "$output_dir"/*tplink_tl-7dr7299-v1-squashfs-sysupgrade.itb
+          cp .config "$output_dir/build.config"
+          sha256sum "$output_dir"/* > "$output_dir/sha256sums-custom"
+          echo "OUTPUT_DIR=$output_dir" >> "$GITHUB_ENV"
+          echo "BUILD_DATE=$(date +'%Y.%m.%d-%H%M')" >> "$GITHUB_ENV"
 
-    - name: Compile Firmware(开始编译固件)
-      id: compile
-      run: |
-        cd $OPENWRT_PATH
-        echo -e "$(nproc) thread compile"
-        make -j$(nproc) || make -j1 V=s
-        echo "status=success" >> $GITHUB_OUTPUT
-        echo "DATE=$(date +"%Y-%m-%d %H:%M:%S")" >> $GITHUB_ENV
-        echo "FILE_DATE=$(date +"%Y.%m.%d")" >> $GITHUB_ENV
+      - name: Upload Actions artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: TL-7DR7299-mtwifi-${{ env.BUILD_DATE }}
+          path: ${{ env.OUTPUT_DIR }}
+          retention-days: 30
 
-    - name: Check Space Usage(检查空间使用情况)
-      if: (!cancelled())
-      run: df -hT
+      - name: Publish GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: tl-7dr7299-${{ env.BUILD_DATE }}
+          name: TL-7DR7299 closed-source Wi-Fi ${{ env.BUILD_DATE }}
+          generate_release_notes: false
+          body: |
+            TP-Link TL-7DR7299 v1 custom ImmortalWrt firmware.
 
-    - name: Upload Bin Directory(上传bin目录)
-      if: steps.compile.outputs.status == 'success' && env.UPLOAD_BIN_DIR == 'true'
-      uses: actions/upload-artifact@v4
-      with:
-        name: ${{ env.SOURCE_REPO }}-bin-${{ env.FIRMWARE_TAG }}-${{ env.FILE_DATE }}
-        path: ${{ env.OPENWRT_PATH }}/bin
-
-    - name: Organize Files(整理文件)
-      if: steps.compile.outputs.status == 'success'
-      run: |
-        cd $OPENWRT_PATH/bin/targets/*/*
-        cat sha256sums
-        echo "VERSION_KERNEL=$(find -type f -name "*.manifest" -exec grep -oP '^kernel - \K.*?(?=~|-\d+-)' {} \;)" >> $GITHUB_ENV
-        cp $OPENWRT_PATH/.config build.config
-        mkdir -p packages
-        [ -d $OPENWRT_PATH/bin/packages ] && find $OPENWRT_PATH/bin/packages -type f -name "*.ipk" -exec cp -f {} packages \;
-        [ -d packages ] && tar -zcf Packages.tar.gz packages || true
-        rm -rf feeds.buildinfo version.buildinfo
-        echo "FIRMWARE_PATH=$PWD" >> $GITHUB_ENV
-
-    - name: Upload Firmware To Artifact(将固件上传到Artifact)
-      if: steps.compile.outputs.status == 'success' && env.FIRMWARE_RELEASE != 'true'
-      uses: actions/upload-artifact@v4
-      with:
-        name: ${{ env.SOURCE_REPO }}-firmware-${{ env.FIRMWARE_TAG }}-${{ env.FILE_DATE }}
-        path: ${{ env.FIRMWARE_PATH }}
-
-    - name: Upload Firmware To Release(发布固件)
-      if: steps.compile.outputs.status == 'success' && env.FIRMWARE_RELEASE == 'true'
-      uses: ncipollo/release-action@v1
-      with:
-        name: ImmortalWrt ${{ env.FIRMWARE_TAG }} (${{ env.DATE }})
-        allowUpdates: true
-        tag: ${{ env.FIRMWARE_TAG }}-${{ env.VERSION_KERNEL }}
-        token: ${{ secrets.GITHUB_TOKEN }}
-        artifacts: ${{ env.FIRMWARE_PATH }}/*
-        body: |
-          **This is OpenWrt Firmware for ${{ env.FIRMWARE_TAG }}**
-          ### 固件信息(${{ env.DEVICE_PROFILE }})
-          - 默认地址: 192.168.123.1
-          - 默认密码: 无
-          - 固件内核版本：${{ env.VERSION_KERNEL }}
-          - 固件源码: ${{ env.REPO_URL }}
-          - 源码分支: ${{ env.REPO_BRANCH }}
-          - 固件编译前最后一次➦[源码更新记录](${{ env.REPO_URL }})
-          - ${{ env.VERSION_INFO }}
+            - Source: padavanonly/immortalwrt-mt798x-6.6
+            - Branch: mt798x-mt799x-6.6-mtwifi
+            - Wi-Fi: MediaTek proprietary MT7992 driver
+            - LAN address: 192.168.6.1
+            - Initial root password: empty; set it immediately after first login
+            - Included: iStore, OpenClash, TurboACC, ttyd, Samba4/USB storage,
+              nlbwmon, UPnP, file manager, Tailscale and matching kmod-tun
+          files: ${{ env.OUTPUT_DIR }}/*
