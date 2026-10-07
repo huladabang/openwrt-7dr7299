@@ -98,7 +98,7 @@ jobs:
           find "$output_dir" -maxdepth 1 -type f ! -name 'sha256sums-custom' -print0 \
             | sort -z \
             | xargs -0 sha256sum > "$output_dir/sha256sums-custom"
-          echo "OUTPUT_DIR=$output_dir" >> "$GITHUB_ENV"
+          echo "OUTPUT_DIR=$OPENWRT_PATH/${output_dir#./}" >> "$GITHUB_ENV"
           echo "BUILD_DATE=$(date +'%Y.%m.%d-%H%M')" >> "$GITHUB_ENV"
 
       - name: Upload Actions artifact
