@@ -1,0 +1,11 @@
+{
+	"luci-app-quark-lite": {
+		"description": "Manage OpenList Quark Lite",
+		"read": {
+			"uci": [ "quark-lite" ]
+		},
+		"write": {
+			"uci": [ "quark-lite" ]
+		}
+	}
+}

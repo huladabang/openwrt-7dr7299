@@ -1,0 +1,13 @@
+{
+	"admin/services/quark-lite": {
+		"title": "夸克网盘",
+		"order": 70,
+		"action": {
+			"type": "view",
+			"path": "quark-lite/basic"
+		},
+		"depends": {
+			"acl": [ "luci-app-quark-lite" ]
+		}
+	}
+}
