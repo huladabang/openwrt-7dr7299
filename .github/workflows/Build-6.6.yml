@@ -19,6 +19,8 @@ concurrency:
 env:
   REPO_URL: https://github.com/padavanonly/immortalwrt-mt798x-6.6.git
   REPO_BRANCH: mt798x-mt799x-6.6-mtwifi
+  # Exact source revision used by the known-good Enshan image (r1-6b7374feb).
+  SOURCE_COMMIT: 6b7374feb2c7e4b0a9486333578f2b8950008840
   TZ: Asia/Shanghai
 
 jobs:
@@ -50,6 +52,10 @@ jobs:
       - name: Clone ImmortalWrt source
         run: |
           git clone --depth=1 --branch "$REPO_BRANCH" "$REPO_URL" openwrt
+          cd openwrt
+          git fetch --depth=1 origin "$SOURCE_COMMIT"
+          git checkout --detach "$SOURCE_COMMIT"
+          test "$(git rev-parse HEAD)" = "$SOURCE_COMMIT"
           echo "OPENWRT_PATH=$GITHUB_WORKSPACE/openwrt" >> "$GITHUB_ENV"
 
       - name: Prepare feeds and packages
@@ -66,6 +72,9 @@ jobs:
           cp defconfig/mt7988_mt7992.config .config
           cat "$GITHUB_WORKSPACE/configs/6.6.txt" >> .config
           make defconfig
+          grep -qx 'CONFIG_MTK_WIFI7_FIRST_IF_IPAILNA=y' .config
+          grep -qx '# CONFIG_MTK_WIFI7_FIRST_IF_EPAELNA is not set' .config
+          grep -qx 'CONFIG_MTK_WIFI7_SECOND_IF_EPAELNA=y' .config
           grep -E 'CONFIG_TARGET_.*7dr7299|CONFIG_PACKAGE_(luci-app-store|luci-app-openclash|luci-app-turboacc-mtk|luci-app-ttyd|luci-app-samba4|luci-app-nlbwmon|luci-app-upnp|luci-app-filemanager|kmod-tun|tailscale)=' .config
 
       - name: Restore compiler cache
@@ -119,6 +128,8 @@ jobs:
 
             - Source: padavanonly/immortalwrt-mt798x-6.6
             - Branch: mt798x-mt799x-6.6-mtwifi
+            - Source revision: 6b7374feb (matched to the known-good Enshan image)
+            - RF front end: first radio iPA/iLNA, second radio ePA/eLNA
             - Wi-Fi: MediaTek proprietary MT7992 driver
             - LAN address: 192.168.6.1
             - Initial root password: empty; set it immediately after first login

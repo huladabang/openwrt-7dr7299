@@ -3,6 +3,15 @@ CONFIG_TARGET_mediatek=y
 CONFIG_TARGET_mediatek_filogic_a73=y
 CONFIG_TARGET_mediatek_filogic_a73_DEVICE_tplink_tl-7dr7299-v1=y
 
+# Match the known-good Enshan build's TL-7DR7299 RF front-end selection.
+# Radio 1 uses internal PA/LNA; radio 2 uses external PA/LNA.
+CONFIG_MTK_WIFI7_FIRST_IF_IPAILNA=y
+# CONFIG_MTK_WIFI7_FIRST_IF_EPAELNA is not set
+# CONFIG_MTK_WIFI7_FIRST_IF_IPAELNA is not set
+CONFIG_MTK_WIFI7_SECOND_IF_EPAELNA=y
+# CONFIG_MTK_WIFI7_SECOND_IF_IPAILNA is not set
+# CONFIG_MTK_WIFI7_SECOND_IF_IPAELNA is not set
+
 # Web UI and Chinese localization
 CONFIG_PACKAGE_luci-ssl-openssl=y
 CONFIG_PACKAGE_luci-i18n-base-zh-cn=y
